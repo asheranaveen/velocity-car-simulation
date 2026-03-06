@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Car A → B — Variable Speed</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(145deg, #0f0f14 0%, #1a1a24 50%, #12121a 100%);
+      color: #e4e4e7;
+      font-family: 'Outfit', sans-serif;
+      padding: 1.5rem;
+    }
+    h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 1.5rem;
+      letter-spacing: 0.02em;
+      margin: 0 0 1rem 0;
+      background: linear-gradient(90deg, #a78bfa, #c4b5fd);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .road-container {
+      background: #18181b;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid #27272a;
+    }
+    .road {
+      height: 80px;
+      background: linear-gradient(180deg, #27272a 0%, #3f3f46 8%, #27272a 16%, #27272a 84%, #3f3f46 92%, #27272a 100%);
+      border-radius: 8px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+    .road::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 0;
+      border-top: 2px dashed #52525b;
+      opacity: 0.7;
+    }
+    .point-label {
+      position: absolute;
+      top: -1.6rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: #a1a1aa;
+    }
+    .point-a { left: 0; }
+    .point-b { right: 0; }
+    .car {
+      position: absolute;
+      left: 24px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 48px;
+      height: 28px;
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: left 0.05s linear;
+      z-index: 2;
+    }
+    .car::before {
+      content: '🚗';
+      font-size: 1.4rem;
+      filter: grayscale(0.2);
+    }
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+    .controls button {
+      font-family: 'JetBrains Mono', monospace;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #3f3f46;
+      background: #27272a;
+      color: #e4e4e7;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .controls button:hover {
+      background: #3f3f46;
+      border-color: #52525b;
+    }
+    .controls button.playing {
+      background: #22c55e;
+      border-color: #16a34a;
+      color: #0f0f14;
+    }
+    .time-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: #a78bfa;
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 700px) {
+      .charts { grid-template-columns: 1fr; }
+    }
+    .chart-box {
+      background: #18181b;
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid #27272a;
+    }
+    .chart-box h2 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem 0;
+      color: #d4d4d8;
+    }
+    .chart-box canvas {
+      max-height: 220px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Car: A → B (variable speed, v &gt; 0)</h1>
+
+  <div class="road-container">
+    <div class="road" id="road">
+      <span class="point-label point-a">A</span>
+      <span class="point-label point-b">B</span>
+      <div class="car" id="car"></div>
+    </div>
+    <div class="controls">
+      <button type="button" id="playBtn">Play</button>
+      <button type="button" id="resetBtn">Reset</button>
+      <span class="time-display">t = <span id="timeVal">0.00</span> s</span>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="chart-box">
+      <h2>Velocity vs time (m/s)</h2>
+      <canvas id="velocityChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <h2>Speed vs time (m/s)</h2>
+      <canvas id="speedChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const DURATION = 10;
+    const ROAD_PADDING = 24;
+    const CAR_WIDTH = 48;
+
+    // Velocity v(t): variable, always positive (e.g. ramp up, vary, ramp down)
+    function velocityAt(t) {
+      if (t <= 0) return 0;
+      if (t >= DURATION) return 0;
+      const x = t / DURATION;
+      // Smooth curve: slow start, faster middle, slow end. All values > 0.
+      const v = 8 + 14 * Math.sin(Math.PI * x) + 4 * Math.sin(3 * Math.PI * x);
+      return Math.max(0.5, v);
+    }
+
+    // Speed = |velocity|; here velocity is always positive so speed = velocity
+    function speedAt(t) {
+      return Math.abs(velocityAt(t));
+    }
+
+    // Position by integrating velocity (numerical)
+    function positionAt(t) {
+      if (t <= 0) return 0;
+      let x = 0;
+      const dt = 0.02;
+      for (let s = 0; s < t; s += dt) {
+        x += velocityAt(s) * dt;
+      }
+      return x;
+    }
+
+    const totalDistance = positionAt(DURATION);
+
+    // Sample data for charts
+    const timeSamples = [];
+    const velocitySamples = [];
+    const speedSamples = [];
+    for (let t = 0; t <= DURATION; t += 0.1) {
+      timeSamples.push(t);
+      velocitySamples.push(velocityAt(t));
+      speedSamples.push(speedAt(t));
+    }
+
+    const roadEl = document.getElementById('road');
+    const carEl = document.getElementById('car');
+    const playBtn = document.getElementById('playBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const timeVal = document.getElementById('timeVal');
+
+    const roadWidth = () => roadEl.offsetWidth - ROAD_PADDING * 2 - CAR_WIDTH;
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: true,
+      animation: { duration: 0 },
+      scales: {
+        x: {
+          grid: { color: '#27272a' },
+          ticks: { color: '#71717a', maxTicksLimit: 8 }
+        },
+        y: {
+          grid: { color: '#27272a' },
+          ticks: { color: '#71717a' },
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        legend: { display: false }
+      }
+    };
+
+    const velocityChart = new Chart(document.getElementById('velocityChart'), {
+      type: 'line',
+      data: {
+        labels: timeSamples.map(t => t.toFixed(1)),
+        datasets: [
+          {
+            label: 'v(t)',
+            data: velocitySamples,
+            borderColor: '#a78bfa',
+            backgroundColor: 'rgba(167, 139, 250, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 4
+          },
+          { label: 'now', data: [], borderColor: '#fbbf24', backgroundColor: '#fbbf24', pointRadius: 5, showLine: false }
+        ]
+      },
+      options: chartOptions
+    });
+
+    const speedChart = new Chart(document.getElementById('speedChart'), {
+      type: 'line',
+      data: {
+        labels: timeSamples.map(t => t.toFixed(1)),
+        datasets: [
+          {
+            label: 'speed |v(t)|',
+            data: speedSamples,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 4
+          },
+          { label: 'now', data: [], borderColor: '#fbbf24', backgroundColor: '#fbbf24', pointRadius: 5, showLine: false }
+        ]
+      },
+      options: chartOptions
+    });
+
+    let currentTime = 0;
+    let playing = false;
+    let lastFrame = 0;
+
+    function updateCarAndCharts() {
+      const x = positionAt(currentTime);
+      const fraction = totalDistance > 0 ? x / totalDistance : 0;
+      const left = ROAD_PADDING + fraction * roadWidth();
+      carEl.style.left = `${Math.max(ROAD_PADDING, Math.min(left, roadWidth() + ROAD_PADDING))}px`;
+
+      timeVal.textContent = currentTime.toFixed(2);
+
+      // Update moving "current time" point on both charts
+      const v = velocityAt(currentTime);
+      const s = speedAt(currentTime);
+      velocityChart.data.datasets[1] = {
+        label: 'now',
+        data: timeSamples.map((t, i) => Math.abs(t - currentTime) < 0.15 ? velocitySamples[i] : null),
+        borderColor: '#fbbf24',
+        backgroundColor: '#fbbf24',
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        showLine: false
+      };
+      speedChart.data.datasets[1] = {
+        label: 'now',
+        data: timeSamples.map((t, i) => Math.abs(t - currentTime) < 0.15 ? speedSamples[i] : null),
+        borderColor: '#fbbf24',
+        backgroundColor: '#fbbf24',
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        showLine: false
+      };
+      velocityChart.update('none');
+      speedChart.update('none');
+    }
+
+    function tick(now) {
+      if (!playing) return;
+      const dt = (now - lastFrame) / 1000;
+      lastFrame = now;
+      currentTime = Math.min(currentTime + dt, DURATION);
+      updateCarAndCharts();
+      if (currentTime >= DURATION) {
+        playing = false;
+        playBtn.textContent = 'Play';
+        playBtn.classList.remove('playing');
+      }
+      requestAnimationFrame(tick);
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (playing) {
+        playing = false;
+        playBtn.textContent = 'Play';
+        playBtn.classList.remove('playing');
+        return;
+      }
+      if (currentTime >= DURATION) currentTime = 0;
+      playing = true;
+      playBtn.textContent = 'Pause';
+      playBtn.classList.add('playing');
+      lastFrame = performance.now();
+      requestAnimationFrame(tick);
+    });
+
+    resetBtn.addEventListener('click', () => {
+      playing = false;
+      playBtn.textContent = 'Play';
+      playBtn.classList.remove('playing');
+      currentTime = 0;
+      updateCarAndCharts();
+    });
+
+    updateCarAndCharts();
+  </script>
+</body>
+</html>
